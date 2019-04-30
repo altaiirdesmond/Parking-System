@@ -1,0 +1,5 @@
+__vm/
+.filters
+.sln
+src/.vs
+src/__vm
