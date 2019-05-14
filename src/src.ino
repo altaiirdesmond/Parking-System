@@ -4,13 +4,15 @@
     Author:     DESKTOP-CDTEKK\cdtekk
 */
 
+#include <SPI.h>
 #include <EEPROM.h>
 #include <LiquidCrystal_I2C.h>
 #include <Servo.h>
 #include <MFRC522.h>
 
 const int RST_PIN = 5;
-MFRC522 mfrc522(SS, RST_PIN);  // Create MFRC522 instance (53, 5) of arduino
+const int RFID_SLAVE_PIN = 53;
+MFRC522 mfrc522(RFID_SLAVE_PIN, RST_PIN);  // Create MFRC522 instance (53, 5) of arduino
 
 Servo servoEntrance;
 Servo servoExit;
@@ -19,22 +21,25 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);  // set the LCD address to 0x27 for a 16 cha
 
 // PINS
 const uint8_t ANALOG_PINS[] = { A0, A1, A2, A3, A4 };
-const int IR_PIN = 3;
+const int IR_PIN = 39;
 const int LED_PIN_1_RED = 4;
-const int LED_PIN_1_GREEN = 5;
-const int LED_PIN_2_RED = 6;
-const int LED_PIN_2_GREEN = 7;
-const int LED_PIN_3_RED = 8;
-const int LED_PIN_3_GREEN = 9;
-const int LED_PIN_4_RED = 10;
-const int LED_PIN_4_GREEN = 11;
-const int LED_PIN_5_RED = 12;
-const int LED_PIN_5_GREEN = 13;
+const int LED_PIN_1_GREEN = 6;
+const int LED_PIN_2_RED = 7;
+const int LED_PIN_2_GREEN = 8;
+const int LED_PIN_3_RED = 9;
+const int LED_PIN_3_GREEN = 10;
+const int LED_PIN_4_RED = 11;
+const int LED_PIN_4_GREEN = 12;
+const int LED_PIN_5_RED = 13;
+const int LED_PIN_5_GREEN = 22;
 
 //	
 unsigned long previousMillis = 0;
+unsigned long currentMillis = 0;
 int availableSlots = 5;
+int currentOccupied;
 int balanceLeft;
+boolean exited;
 String strContent;
 
 void setup() {
@@ -42,29 +47,99 @@ void setup() {
 	Serial.begin(9600);
 	// Init EEPROM
 	EEPROM.begin();
+	//
+	lcd.begin();
+	lcd.backlight();
+	// Init SPI
+	SPI.begin();
 	// Init MFRC522
 	mfrc522.PCD_Init();
 	// Show details of PCD - MFRC522 Card Reader details
 	mfrc522.PCD_DumpVersionToSerial();
 	// Init pins to control
-	for (size_t i = 3; i < 14; i++) {
-		pinMode(i, OUTPUT);
-	}
+	pinMode(IR_PIN, INPUT);
+	pinMode(LED_PIN_1_GREEN, OUTPUT);
+	pinMode(LED_PIN_1_RED, OUTPUT);
+	pinMode(LED_PIN_2_GREEN, OUTPUT);
+	pinMode(LED_PIN_2_RED, OUTPUT);
+	pinMode(LED_PIN_3_GREEN, OUTPUT);
+	pinMode(LED_PIN_3_RED, OUTPUT);
+	pinMode(LED_PIN_4_GREEN, OUTPUT);
+	pinMode(LED_PIN_4_RED, OUTPUT);
+	pinMode(LED_PIN_5_GREEN, OUTPUT);
+	pinMode(LED_PIN_5_RED, OUTPUT);
 	// Init pins to listen
 	for (size_t i = 0; i < 5; i++) {
 		pinMode(ANALOG_PINS[i], INPUT);
 	}
 	// Init and designate servo pins
-	servoEntrance.attach(5);
-	servoExit.attach(6);
+	servoEntrance.attach(40);
+	servoExit.attach(41);
 
+	/* UNCOMMENT IF RE-WRITING EEPROM */
 	//ClearEEPROM();
 	//WriteString(0, "RFID_CONTENTS");
 
-	availableSlots -= OccupiedSlots();
+	servoEntrance.write(90);
+	servoExit.write(0);
+
+	availableSlots = 5;
+
+	lcd.setCursor(0, 0);
+	lcd.print("available slots");
+	lcd.setCursor(0, 1);
+	lcd.print(availableSlots);
 }
 
 void loop() {
+
+	// Provides non-block check
+	currentMillis = millis();
+	if ((currentMillis - previousMillis) > (long)500) {
+		previousMillis = currentMillis;
+
+		// Check each slots
+		if (digitalRead(IR_PIN) == LOW) {
+
+			servoExit.write(90);
+
+			delay(3000);
+
+			servoExit.write(0);
+		}
+
+		/*
+		 * Photoresistor value
+		 * 0	- no light
+		 * 1024 - bright light
+		 */
+
+		SwapState(
+			LED_PIN_1_RED,							// Red led of the parking
+			LED_PIN_1_GREEN,						// Green led of the parking
+			analogRead(ANALOG_PINS[0]) > 125);		// Tell which leds should change state
+
+		SwapState(
+			LED_PIN_2_RED,
+			LED_PIN_2_GREEN,
+			analogRead(ANALOG_PINS[1]) > 125);
+
+		SwapState(
+			LED_PIN_3_RED,
+			LED_PIN_3_GREEN,
+			analogRead(ANALOG_PINS[2]) > 125);
+
+		SwapState(
+			LED_PIN_4_RED,
+			LED_PIN_4_GREEN,
+			analogRead(ANALOG_PINS[3]) > 125);
+
+		SwapState(
+			LED_PIN_5_RED,
+			LED_PIN_5_GREEN,
+			analogRead(ANALOG_PINS[4]) > 125);
+	}
+
 	// Wait for PICC tap
 	if (!mfrc522.PICC_IsNewCardPresent()) {
 		return;
@@ -131,6 +206,30 @@ void loop() {
 
 		availableSlots -= 1;
 
+		Serial.println(availableSlots);
+
+		lcd.clear();
+		lcd.setCursor(0, 0);
+		lcd.print("ACCESS GRANTED");
+
+		delay(1500);
+
+		lcd.clear();
+		lcd.setCursor(0, 0);
+		lcd.println("BAL left");
+		lcd.setCursor(0, 1);
+		lcd.print(balanceLeft);
+
+		delay(1500);
+
+		lcd.clear();
+		lcd.setCursor(0, 0);
+		lcd.print("available slots");
+		lcd.setCursor(0, 1);
+		lcd.print(availableSlots);
+
+		lcd.clear();
+
 		// Clear first
 		ClearEEPROM();
 
@@ -143,57 +242,11 @@ void loop() {
 		Serial.println("--------------------------------------------------------");
 		Serial.println(EEPROMGetContents());
 
-		//servoEntrance.write(90);
+		servoEntrance.write(0);
 
-		//delay(1500);
+		delay(3000);
 
-		//servoEntrance.write(0);
-	}
-
-	// Someone has left the parking area
-	if (digitalRead(IR_PIN) == HIGH) {
-		availableSlots++;
-
-		//servoEntrance.write(90);
-
-		//delay(1500);
-
-		//servoEntrance.write(0);
-	}
-
-	// Provides non-block check
-	if ((millis() - previousMillis) > 100) {
-		previousMillis = millis();
-
-		/* 
-		 * Photoresistor value
-		 * 0	- no light
-		 * 1024 - bright light
-		 */
-		SwapState(
-			LED_PIN_1_RED,							// Red led of the parking
-			LED_PIN_1_GREEN,						// Green led of the parking
-			CheckParkSpace(ANALOG_PINS[0]) > 0);	// Tell which leds should change state
-
-		SwapState(
-			LED_PIN_2_RED,
-			LED_PIN_2_GREEN,
-			CheckParkSpace(ANALOG_PINS[1]) > 0);
-
-		SwapState(
-			LED_PIN_3_RED,
-			LED_PIN_3_GREEN,
-			CheckParkSpace(ANALOG_PINS[2]) > 0);
-
-		SwapState(
-			LED_PIN_4_RED,
-			LED_PIN_4_GREEN,
-			CheckParkSpace(ANALOG_PINS[3]) > 0);
-
-		SwapState(
-			LED_PIN_5_RED,
-			LED_PIN_5_GREEN,
-			CheckParkSpace(ANALOG_PINS[4]) > 0);
+		servoEntrance.write(90);
 	}
 }
 
@@ -207,22 +260,6 @@ char *dump_byte_array(byte *buffer, byte bufferSize) {
 
 	// Returns duplicate
 	return strdup(data);
-}
-
-// Continously monitor slots
-uint8_t OccupiedSlots() {
-	// Always reset to zero to avoid overflow counting of slot
-	// availability
-	int occupiedSlots = 0;
-	for (size_t i = 0; i < 5; i++) {
-		uint16_t value = analogRead(ANALOG_PINS[i]);
-		// This will check how many slots are available
-		if (value < 1) {
-			occupiedSlots++;
-		}
-	}
-
-	return occupiedSlots;
 }
 
 // Resolves scanned RFID content
@@ -308,10 +345,6 @@ void SwapState(int redLed, int greenLed, boolean slotEmpty) {
 		digitalWrite(redLed, HIGH);
 		digitalWrite(greenLed, LOW);
 	}
-}
-
-uint16_t CheckParkSpace(uint16_t sensor) {
-	return sensor;
 }
 
 // Wipe RFID contents
